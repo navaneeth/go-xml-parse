@@ -1,22 +1,20 @@
-package main
+// Modified version of - https://github.com/dps/go-xml-parse
 
-// An example streaming XML parser.
+package main
 
 import (
 	"bufio"
-	"fmt"
-	"os"
-	"flag"
 	"encoding/xml"
-	"strings"
-	"regexp"
+	"flag"
+	"fmt"
 	"net/url"
+	"os"
+	"path"
+	"strings"
 )
 
-var inputFile = flag.String("infile", "enwiki-latest-pages-articles.xml", "Input file path")
-var indexFile = flag.String("indexfile", "out/article_list.txt", "article list output file")
-
-var filter, _ = regexp.Compile("^file:.*|^talk:.*|^special:.*|^wikipedia:.*|^wiktionary:.*|^user:.*|^user_talk:.*")
+var inputFile = flag.String("infile", "", "Input file path")
+var outDir = flag.String("outdir", "", "Output directory")
 
 // Here is an example article from the Wikipedia XML dump
 //
@@ -43,9 +41,9 @@ type Redirect struct {
 }
 
 type Page struct {
-	Title string `xml:"title"`
+	Title string   `xml:"title"`
 	Redir Redirect `xml:"redirect"`
-	Text string `xml:"revision>text"`
+	Text  string   `xml:"revision>text"`
 }
 
 func CanonicalizeTitle(title string) string {
@@ -55,11 +53,14 @@ func CanonicalizeTitle(title string) string {
 	return can
 }
 
-func WritePage(title string, text string) {
-	outFile, err := os.Create("out/docs/" + title)
+func WritePage(title string, text string, targetFile string) {
+	outFile, err := os.Create(targetFile)
 	if err == nil {
 		writer := bufio.NewWriter(outFile)
 		defer outFile.Close()
+		writer.WriteString(title)
+		writer.WriteString("\n")
+		writer.WriteString("---------------\n")
 		writer.WriteString(text)
 		writer.Flush()
 	}
@@ -74,6 +75,16 @@ func main() {
 		return
 	}
 	defer xmlFile.Close()
+
+	if *outDir == "" {
+		fmt.Println("Outdir is not specified")
+		return
+	}
+	err = os.MkdirAll(path.Join(*outDir, "media-wiki-dump-splitted"), 0777)
+	if err != nil {
+		fmt.Println("Error creating out directory:", err)
+		return
+	}
 
 	decoder := xml.NewDecoder(xmlFile)
 	total := 0
@@ -98,15 +109,15 @@ func main() {
 
 				// Do some stuff with the page.
 				p.Title = CanonicalizeTitle(p.Title)
-				m := filter.MatchString(p.Title)
-				if !m && p.Redir.Title == "" {
-					WritePage(p.Title, p.Text)
+				if p.Redir.Title == "" {
+					targetFile := path.Join(*outDir, "media-wiki-dump-splitted", fmt.Sprintf("%d.txt", total))
+					go WritePage(p.Title, p.Text, targetFile)
 					total++
 				}
 			}
 		default:
 		}
-		
+
 	}
 
 	fmt.Printf("Total articles: %d \n", total)
